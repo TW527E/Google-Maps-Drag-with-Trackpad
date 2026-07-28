@@ -1,0 +1,299 @@
+// ==UserScript==
+// @name:en         Google Maps Trackpad Pan & Pinch Zoom
+// @name   Google Maps 觸控板雙指拖曳與縮放
+// @namespace    https://github.com/TW527E/Google-Maps-Drag-with-Trackpad
+// @version      1.1.0
+// @description:en  Use two-finger trackpad scrolling to pan Google Maps while keeping pinch-to-zoom.
+// @description 將觸控板雙指滑動改成拖曳 Google Maps，並保留雙指捏合縮放。
+// @author       TW527E
+// @include      /^https:\/\/(?:www\.)?google\.[^/]+\/maps(?:[/?#].*)?$/
+// @include      /^https:\/\/maps\.google\.[^/]+\/(?:[?#].*)?$/
+// @run-at       document-start
+// @grant        none
+// @lisence MIT
+// ==/UserScript==
+
+(() => {
+  'use strict';
+
+  /*
+   * Chrome/Firefox on macOS report these two trackpad gestures differently:
+   *
+   *   Two-finger slide  -> WheelEvent with ctrlKey === false
+   *   Two-finger pinch  -> WheelEvent with ctrlKey === true
+   *
+   * We consume only the first kind and turn it into a synthetic mouse drag.
+   * Pinch events continue to Google Maps unchanged, so its native smooth zoom
+   * remains responsible for scaling around the pointer.
+   */
+
+  const SETTINGS = Object.freeze({
+    // Increase this if panning feels too slow; decrease it if it feels too fast.
+    panSpeed: 1,
+
+    // A wheel gesture has no explicit "end" event. Release the synthetic drag
+    // after this many quiet milliseconds. Inertial wheel events keep it alive.
+    gestureEndDelayMs: 90,
+
+    // Avoid starting a drag for sensor noise close to zero.
+    minimumDelta: 0.01,
+
+    // Browsers do not expose whether a WheelEvent came from a mouse or a
+    // trackpad. In auto mode, discrete/large wheel steps keep Maps' native zoom
+    // while small, continuous or horizontal input is treated as a trackpad.
+    inputDevice: 'auto', // 'auto', 'trackpad', or 'mouse'
+    mouseWheelDeltaThreshold: 50,
+    inputTransactionTimeoutMs: 180,
+  });
+
+  const MAP_SURFACE_SELECTORS = [
+    '#scene',
+    '.widget-scene',
+    '[role="application"]',
+    '[class*="mapsConsumerUiSceneCoreScene__scene"]',
+  ].join(',');
+
+  let drag = null;
+  let releaseTimer = 0;
+  let inputTransaction = {
+    kind: null,
+    lastEventAt: 0,
+  };
+
+  function resetInputTransaction() {
+    inputTransaction = {
+      kind: null,
+      lastEventAt: 0,
+    };
+  }
+
+  function inputKind(event) {
+    if (SETTINGS.inputDevice !== 'auto') return SETTINGS.inputDevice;
+
+    const now = performance.now();
+    const isSameTransaction =
+      inputTransaction.kind !== null &&
+      now - inputTransaction.lastEventAt <= SETTINGS.inputTransactionTimeoutMs;
+
+    inputTransaction.lastEventAt = now;
+    if (isSameTransaction) return inputTransaction.kind;
+
+    const absX = Math.abs(event.deltaX);
+    const absY = Math.abs(event.deltaY);
+    const largestDelta = Math.max(absX, absY);
+
+    // Detented mouse wheels commonly use line/page units. Trackpads in modern
+    // desktop browsers normally provide continuous pixel deltas.
+    if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) {
+      inputTransaction.kind = 'mouse';
+      return inputTransaction.kind;
+    }
+
+    // A non-trivial horizontal component is a strong trackpad signal. Locking
+    // the result for the rest of the wheel transaction also covers a gesture
+    // that later becomes purely vertical or develops large inertial deltas.
+    if (absX > SETTINGS.minimumDelta) {
+      inputTransaction.kind = 'trackpad';
+      return inputTransaction.kind;
+    }
+
+    inputTransaction.kind =
+      largestDelta >= SETTINGS.mouseWheelDeltaThreshold
+        ? 'mouse'
+        : 'trackpad';
+
+    return inputTransaction.kind;
+  }
+
+  function wheelPixels(event) {
+    let factor = 1;
+
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+      factor = 16;
+    } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+      factor = Math.max(window.innerHeight, 1);
+    }
+
+    return {
+      x: event.deltaX * factor * SETTINGS.panSpeed,
+      y: event.deltaY * factor * SETTINGS.panSpeed,
+    };
+  }
+
+  function isUsableCanvas(element) {
+    if (!(element instanceof HTMLCanvasElement)) return false;
+
+    const rect = element.getBoundingClientRect();
+    return rect.width >= 240 && rect.height >= 180;
+  }
+
+  function mapSurfaceAt(x, y) {
+    const hit = document.elementFromPoint(x, y);
+    if (!hit) return null;
+
+    // Prefer Google Maps' known scene containers. The selectors are kept in a
+    // single function because Google occasionally changes its internal DOM.
+    const scene = hit.closest?.(MAP_SURFACE_SELECTORS);
+    if (scene) return { scene, target: hit };
+
+    // Fallback for a renamed scene container: the primary map is rendered to a
+    // large canvas. Only inspect the topmost element so a scrollable side panel
+    // layered above the map is never mistaken for the map surface underneath.
+    if (isUsableCanvas(hit)) {
+      return {
+        scene: hit.parentElement ?? hit,
+        target: hit,
+      };
+    }
+
+    return null;
+  }
+
+  function emitMouse(type, target, x, y, buttons) {
+    target.dispatchEvent(new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      detail: type === 'mousedown' ? 1 : 0,
+      screenX: window.screenX + x,
+      screenY: window.screenY + y,
+      clientX: x,
+      clientY: y,
+      button: 0,
+      buttons,
+    }));
+  }
+
+  function beginDrag(surface, event) {
+    drag = {
+      scene: surface.scene,
+      target: surface.target,
+      x: event.clientX,
+      y: event.clientY,
+    };
+
+    emitMouse('mousedown', drag.target, drag.x, drag.y, 1);
+  }
+
+  function moveDrag(dx, dy) {
+    if (!drag) return;
+
+    const oldX = drag.x;
+    const oldY = drag.y;
+
+    // Wheel deltas describe the direction in which scrollable content moves.
+    // A map dragged with the pointer should follow that content direction, so
+    // mouse coordinates move opposite to the reported wheel deltas.
+    drag.x -= dx;
+    drag.y -= dy;
+
+    const event = new MouseEvent('mousemove', {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      screenX: window.screenX + drag.x,
+      screenY: window.screenY + drag.y,
+      clientX: drag.x,
+      clientY: drag.y,
+      button: 0,
+      buttons: 1,
+    });
+
+    // movementX/Y are not consistently accepted in MouseEventInit. Supplying
+    // them when configurable helps handlers that prefer relative movement.
+    try {
+      Object.defineProperties(event, {
+        movementX: { configurable: true, value: drag.x - oldX },
+        movementY: { configurable: true, value: drag.y - oldY },
+      });
+    } catch {
+      // clientX/clientY above remain sufficient for absolute-position handlers.
+    }
+
+    drag.target.dispatchEvent(event);
+  }
+
+  function endDrag() {
+    window.clearTimeout(releaseTimer);
+    releaseTimer = 0;
+
+    if (!drag) return;
+
+    emitMouse('mouseup', drag.target, drag.x, drag.y, 0);
+    drag = null;
+  }
+
+  function scheduleDragEnd() {
+    window.clearTimeout(releaseTimer);
+    releaseTimer = window.setTimeout(endDrag, SETTINGS.gestureEndDelayMs);
+  }
+
+  function onWheel(event) {
+    // macOS trackpad pinch is exposed as ctrl+wheel. Let Google Maps handle it
+    // normally; consuming it here would either disable map zoom or zoom the page.
+    if (event.ctrlKey) {
+      resetInputTransaction();
+      endDrag();
+      return;
+    }
+
+    // Do not hijack browser shortcuts such as Command + wheel, and do not pan
+    // while the user is holding other modifiers intentionally.
+    if (event.metaKey || event.altKey || event.shiftKey) {
+      resetInputTransaction();
+      endDrag();
+      return;
+    }
+
+    const surface = mapSurfaceAt(event.clientX, event.clientY);
+    if (!surface) {
+      resetInputTransaction();
+      endDrag();
+      return;
+    }
+
+    // Leave ordinary mouse-wheel events untouched so Google Maps can retain
+    // its native wheel-to-zoom behavior.
+    if (inputKind(event) === 'mouse') {
+      endDrag();
+      return;
+    }
+
+    const delta = wheelPixels(event);
+    if (
+      Math.abs(delta.x) < SETTINGS.minimumDelta &&
+      Math.abs(delta.y) < SETTINGS.minimumDelta
+    ) {
+      return;
+    }
+
+    // Capture phase plus stopImmediatePropagation prevents Maps' original wheel
+    // listener from interpreting a vertical two-finger slide as zoom.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (!drag || drag.scene !== surface.scene || !drag.target.isConnected) {
+      endDrag();
+      beginDrag(surface, event);
+    }
+
+    moveDrag(delta.x, delta.y);
+    scheduleDragEnd();
+  }
+
+  // document-start is intentional: registering early in capture phase gives the
+  // userscript priority over listeners added later by the Google Maps bundle.
+  window.addEventListener('wheel', onWheel, {
+    capture: true,
+    passive: false,
+  });
+
+  // Do not use capture here: focusing the map blurs the previously focused DOM
+  // element, and a captured element-level blur would release our drag at once.
+  window.addEventListener('blur', endDrag);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) endDrag();
+  });
+})();
