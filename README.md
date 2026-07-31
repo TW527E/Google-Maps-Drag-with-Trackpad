@@ -63,6 +63,8 @@ const SETTINGS = Object.freeze({
   inputDevice: 'auto',
   mouseWheelDeltaThreshold: 50,
   inputTransactionTimeoutMs: 180,
+  pinchMomentumGuardMs: 140,
+  recentPanMomentumMs: 700,
 });
 ```
 
@@ -74,6 +76,8 @@ const SETTINGS = Object.freeze({
 | `inputDevice` | `'auto'` | 輸入辨識模式：`'auto'`、`'trackpad'` 或 `'mouse'`。 |
 | `mouseWheelDeltaThreshold` | `50` | 自動模式下，判定為滑鼠滾輪的大位移門檻。 |
 | `inputTransactionTimeoutMs` | `180` | 將連續滾輪事件視為同一個手勢的間隔上限。 |
+| `pinchMomentumGuardMs` | `140` | 捏合縮放中斷快速平移後，等待殘留慣性事件停止的靜默時間。 |
+| `recentPanMomentumMs` | `700` | 平移結束後，捏合縮放仍會主動中止地圖慣性動畫的時間範圍。 |
 
 ## 輸入裝置辨識
 
@@ -103,7 +107,9 @@ inputDevice: 'trackpad'
 在 macOS 上，一般雙指滑動通常會產生 `WheelEvent`，而雙指捏合通常會產生
 `ctrlKey === true` 的 `WheelEvent`。腳本會在事件擷取階段處理地圖上的一般
 觸控板滑動，阻止 Google Maps 將它解讀為縮放，再將位移轉換成連續的滑鼠拖曳
-事件。捏合及一般滑鼠滾輪則會原樣交給 Google Maps 處理。
+事件。捏合開始時，腳本會將尚未結束的拖曳保持在靜止狀態，並丟棄先前平移留下的
+慣性事件；待輸入停止後才以零速度放開拖曳，避免地圖在縮放時位移、彈回或繼續
+播放舊的慣性動畫。捏合縮放本身及一般滑鼠滾輪仍會交給 Google Maps 處理。
 
 ## 相容性
 

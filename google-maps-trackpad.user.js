@@ -2,7 +2,7 @@
 // @name:en         Google Maps Trackpad Pan & Pinch Zoom
 // @name   Google Maps 觸控板雙指拖曳與縮放
 // @namespace    https://github.com/TW527E/Google-Maps-Drag-with-Trackpad
-// @version      1.1.0
+// @version      1.2.0
 // @description:en  Use two-finger trackpad scrolling to pan Google Maps while keeping pinch-to-zoom.
 // @description 將觸控板雙指滑動改成拖曳 Google Maps，並保留雙指捏合縮放。
 // @author       TW527E
@@ -10,7 +10,7 @@
 // @include      /^https:\/\/maps\.google\.[^/]+\/(?:[?#].*)?$/
 // @run-at       document-start
 // @grant        none
-// @lisence MIT
+// @license      MIT
 // ==/UserScript==
 
 (() => {
@@ -44,6 +44,16 @@
     inputDevice: 'auto', // 'auto', 'trackpad', or 'mouse'
     mouseWheelDeltaThreshold: 50,
     inputTransactionTimeoutMs: 180,
+
+    // Keep an interrupted drag stationary until pinch input and any remaining
+    // pan inertia have both gone quiet. This prevents Maps from starting its
+    // own kinetic animation when a pinch interrupts a fast two-finger pan.
+    pinchMomentumGuardMs: 140,
+
+    // A synthetic drag may already have been released while Maps is still
+    // animating its momentum. A pinch inside this window starts a zero-net
+    // drag to interrupt that animation before zooming.
+    recentPanMomentumMs: 700,
   });
 
   const MAP_SURFACE_SELECTORS = [
@@ -55,6 +65,9 @@
 
   let drag = null;
   let releaseTimer = 0;
+  let pinchGuardActive = false;
+  let pinchGuardTimer = 0;
+  let lastPanActivityAt = Number.NEGATIVE_INFINITY;
   let inputTransaction = {
     kind: null,
     lastEventAt: 0,
@@ -230,18 +243,81 @@
     releaseTimer = window.setTimeout(endDrag, SETTINGS.gestureEndDelayMs);
   }
 
+  function finishPinchGuard() {
+    window.clearTimeout(pinchGuardTimer);
+    pinchGuardTimer = 0;
+    pinchGuardActive = false;
+    lastPanActivityAt = Number.NEGATIVE_INFINITY;
+    resetInputTransaction();
+
+    if (drag) {
+      // The pause plus a final zero-distance move clears Maps' drag velocity
+      // before mouseup, so releasing cannot start a second kinetic animation.
+      moveDrag(0, 0);
+      endDrag();
+    }
+  }
+
+  function schedulePinchGuardEnd() {
+    window.clearTimeout(pinchGuardTimer);
+    pinchGuardTimer = window.setTimeout(
+      finishPinchGuard,
+      SETTINGS.pinchMomentumGuardMs,
+    );
+  }
+
+  function beginOrContinuePinchGuard() {
+    pinchGuardActive = true;
+    window.clearTimeout(releaseTimer);
+    releaseTimer = 0;
+
+    // Keep the existing synthetic drag pressed but motionless while Maps
+    // receives native pinch events. Releasing immediately would make Maps use
+    // the last fast mousemove as momentum and pan underneath the pinch zoom.
+    if (drag) moveDrag(0, 0);
+    schedulePinchGuardEnd();
+  }
+
+  function interruptRecentMapMomentum(event) {
+    if (
+      drag ||
+      performance.now() - lastPanActivityAt > SETTINGS.recentPanMomentumMs
+    ) {
+      return;
+    }
+
+    const surface = mapSurfaceAt(event.clientX, event.clientY);
+    if (!surface) return;
+
+    // A new drag immediately stops Google Maps' kinetic pan. Move a few pixels
+    // out and back so Maps treats this as a drag rather than a map click, while
+    // leaving the camera and pinch anchor at the original location.
+    beginDrag(surface, event);
+    moveDrag(6, 0);
+    moveDrag(-6, 0);
+  }
+
+  function cancelPinchGuard() {
+    window.clearTimeout(pinchGuardTimer);
+    pinchGuardTimer = 0;
+    pinchGuardActive = false;
+  }
+
   function onWheel(event) {
-    // macOS trackpad pinch is exposed as ctrl+wheel. Let Google Maps handle it
-    // normally; consuming it here would either disable map zoom or zoom the page.
+    // macOS trackpad pinch is exposed as ctrl+wheel. Let Google Maps handle the
+    // zoom, but keep an active synthetic drag stationary until both the pinch
+    // and any wheel events left over from the previous pan have gone quiet.
     if (event.ctrlKey) {
       resetInputTransaction();
-      endDrag();
+      interruptRecentMapMomentum(event);
+      beginOrContinuePinchGuard();
       return;
     }
 
     // Do not hijack browser shortcuts such as Command + wheel, and do not pan
     // while the user is holding other modifiers intentionally.
     if (event.metaKey || event.altKey || event.shiftKey) {
+      cancelPinchGuard();
       resetInputTransaction();
       endDrag();
       return;
@@ -249,8 +325,22 @@
 
     const surface = mapSurfaceAt(event.clientX, event.clientY);
     if (!surface) {
+      cancelPinchGuard();
       resetInputTransaction();
       endDrag();
+      return;
+    }
+
+    // A fast pan can continue emitting decreasing non-ctrl wheel events after
+    // the fingers have already started pinching. Consume that residual stream
+    // and extend the quiet-period timer instead of beginning another drag or
+    // allowing Maps to reinterpret it as wheel zoom.
+    if (pinchGuardActive) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      resetInputTransaction();
+      if (drag) moveDrag(0, 0);
+      schedulePinchGuardEnd();
       return;
     }
 
@@ -280,6 +370,7 @@
     }
 
     moveDrag(delta.x, delta.y);
+    lastPanActivityAt = performance.now();
     scheduleDragEnd();
   }
 
@@ -292,8 +383,14 @@
 
   // Do not use capture here: focusing the map blurs the previously focused DOM
   // element, and a captured element-level blur would release our drag at once.
-  window.addEventListener('blur', endDrag);
+  window.addEventListener('blur', () => {
+    cancelPinchGuard();
+    endDrag();
+  });
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) endDrag();
+    if (document.hidden) {
+      cancelPinchGuard();
+      endDrag();
+    }
   });
 })();

@@ -68,6 +68,8 @@ const SETTINGS = Object.freeze({
   inputDevice: 'auto',
   mouseWheelDeltaThreshold: 50,
   inputTransactionTimeoutMs: 180,
+  pinchMomentumGuardMs: 140,
+  recentPanMomentumMs: 700,
 });
 ```
 
@@ -79,6 +81,8 @@ const SETTINGS = Object.freeze({
 | `inputDevice` | `'auto'` | Detection mode: `'auto'`, `'trackpad'`, or `'mouse'`. |
 | `mouseWheelDeltaThreshold` | `50` | Initial large-delta threshold used to recognize a mouse-wheel step. |
 | `inputTransactionTimeoutMs` | `180` | Maximum interval for grouping wheel events into one gesture. |
+| `pinchMomentumGuardMs` | `140` | Quiet period used to discard residual pan inertia after a pinch interrupts a fast pan. |
+| `recentPanMomentumMs` | `700` | Time window in which a pinch actively interrupts an already-running map momentum animation. |
 
 ## Input-device detection
 
@@ -111,8 +115,12 @@ On macOS, a regular two-finger swipe is normally exposed as a `WheelEvent`,
 while a trackpad pinch is commonly exposed as a `WheelEvent` with
 `ctrlKey === true`. During the capture phase, the userscript handles regular
 trackpad movement over the map before Google Maps can interpret it as zoom
-input. It translates the deltas into a continuous mouse drag, while pinch and
-regular mouse-wheel events continue to Google Maps unchanged.
+input. It translates the deltas into a continuous mouse drag. When a pinch
+interrupts a fast pan, the userscript holds the unfinished drag stationary,
+discards residual pan-inertia events, and releases the drag at zero velocity
+after input becomes quiet. This prevents the map from shifting, snapping back,
+or resuming an old kinetic animation underneath the zoom. Pinch zoom itself and
+regular mouse-wheel events still continue to Google Maps.
 
 ## Compatibility
 
