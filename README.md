@@ -127,8 +127,13 @@ inputDevice: 'trackpad'
 
 將 `panSpeed` 改成負值，例如 `-1`。
 
+## 授權條款
+
+本專案採用 [MIT License](./LICENSE) 授權。
+
 ## 相關連結
 
 - [Greasy Fork](https://greasyfork.org/zh-TW/scripts/588879-google-maps-觸控板雙指拖曳與縮放)
 - [原始碼](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad)
 - [問題回報](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/issues)
+- [MIT License](./LICENSE)

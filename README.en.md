@@ -137,8 +137,13 @@ using automatic detection.
 
 Set `panSpeed` to a negative value such as `-1`.
 
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
+
 ## Links
 
 - [Greasy Fork](https://greasyfork.org/zh-TW/scripts/588879-google-maps-觸控板雙指拖曳與縮放)
 - [Source code](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad)
 - [Issue tracker](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/issues)
+- [MIT License](./LICENSE)
