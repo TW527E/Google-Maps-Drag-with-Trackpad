@@ -65,6 +65,7 @@ const SETTINGS = Object.freeze({
   inputTransactionTimeoutMs: 180,
   pinchMomentumGuardMs: 140,
   recentPanMomentumMs: 700,
+  pointerTakeoverGuardMs: 140,
 });
 ```
 
@@ -77,7 +78,8 @@ const SETTINGS = Object.freeze({
 | `mouseWheelDeltaThreshold` | `50` | 自動模式下，判定為滑鼠滾輪的大位移門檻。 |
 | `inputTransactionTimeoutMs` | `180` | 將連續滾輪事件視為同一個手勢的間隔上限。 |
 | `pinchMomentumGuardMs` | `140` | 捏合縮放中斷快速平移後，等待殘留慣性事件停止的靜默時間。 |
-| `recentPanMomentumMs` | `700` | 平移結束後，捏合縮放仍會主動中止地圖慣性動畫的時間範圍。 |
+| `recentPanMomentumMs` | `700` | 平移結束後，新手勢仍會主動中止地圖慣性動畫的時間範圍。 |
+| `pointerTakeoverGuardMs` | `140` | 實體游標接管合成拖曳後，丟棄殘留雙指慣性事件的靜默時間。 |
 
 ## 輸入裝置辨識
 
@@ -109,7 +111,12 @@ inputDevice: 'trackpad'
 觸控板滑動，阻止 Google Maps 將它解讀為縮放，再將位移轉換成連續的滑鼠拖曳
 事件。捏合開始時，腳本會將尚未結束的拖曳保持在靜止狀態，並丟棄先前平移留下的
 慣性事件；待輸入停止後才以零速度放開拖曳，避免地圖在縮放時位移、彈回或繼續
-播放舊的慣性動畫。捏合縮放本身及一般滑鼠滾輪仍會交給 Google Maps 處理。
+播放舊的慣性動畫。新的雙指平移開始時也會先以零距離事件接管仍在播放的舊慣性，
+不注入反向位移，避免放開後地圖方向亂彈。若雙指慣性尚未結束便移動實體游標，
+腳本會在 Google Maps 收到該游標事件前先以零速度結束合成拖曳，並丟棄剩餘的
+慣性滾輪事件，避免兩組座標與速度互相混合。此接管保護只攔截連續的小幅觸控板
+慣性；若偵測到真正的滑鼠滾輪刻度，會立即繞過保護並交回 Google Maps 縮放，
+即使游標仍在移動也不受影響。捏合縮放本身亦仍會交給 Google Maps 處理。
 
 ## 相容性
 

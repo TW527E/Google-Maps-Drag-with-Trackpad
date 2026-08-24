@@ -70,6 +70,7 @@ const SETTINGS = Object.freeze({
   inputTransactionTimeoutMs: 180,
   pinchMomentumGuardMs: 140,
   recentPanMomentumMs: 700,
+  pointerTakeoverGuardMs: 140,
 });
 ```
 
@@ -82,7 +83,8 @@ const SETTINGS = Object.freeze({
 | `mouseWheelDeltaThreshold` | `50` | Initial large-delta threshold used to recognize a mouse-wheel step. |
 | `inputTransactionTimeoutMs` | `180` | Maximum interval for grouping wheel events into one gesture. |
 | `pinchMomentumGuardMs` | `140` | Quiet period used to discard residual pan inertia after a pinch interrupts a fast pan. |
-| `recentPanMomentumMs` | `700` | Time window in which a pinch actively interrupts an already-running map momentum animation. |
+| `recentPanMomentumMs` | `700` | Time window in which a new gesture actively interrupts an already-running map momentum animation. |
+| `pointerTakeoverGuardMs` | `140` | Quiet period used to discard residual two-finger inertia after the physical pointer takes over. |
 
 ## Input-device detection
 
@@ -119,8 +121,16 @@ input. It translates the deltas into a continuous mouse drag. When a pinch
 interrupts a fast pan, the userscript holds the unfinished drag stationary,
 discards residual pan-inertia events, and releases the drag at zero velocity
 after input becomes quiet. This prevents the map from shifting, snapping back,
-or resuming an old kinetic animation underneath the zoom. Pinch zoom itself and
-regular mouse-wheel events still continue to Google Maps.
+or resuming an old kinetic animation underneath the zoom. A new two-finger pan
+also takes over any still-running pan momentum with a zero-distance event,
+without injecting reverse movement that could make the map bounce after release.
+If the physical pointer moves before two-finger inertia ends, the userscript
+releases the synthetic drag at zero velocity before Maps receives that pointer
+event, then discards the remaining inertial wheel tail. This prevents the two
+coordinate and velocity streams from being combined. The takeover guard only
+blocks small, continuous trackpad inertia; a real mouse-wheel step bypasses the
+guard immediately and continues to Google Maps for zooming even while the
+pointer is moving. Pinch zoom itself also continues to Google Maps.
 
 ## Compatibility
 

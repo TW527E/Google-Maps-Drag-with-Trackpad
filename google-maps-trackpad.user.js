@@ -2,7 +2,7 @@
 // @name:en         Google Maps Trackpad Pan & Pinch Zoom
 // @name   Google Maps 觸控板雙指拖曳與縮放
 // @namespace    https://github.com/TW527E/Google-Maps-Drag-with-Trackpad
-// @version      1.2.0
+// @version      1.2.4
 // @description:en  Use two-finger trackpad scrolling to pan Google Maps while keeping pinch-to-zoom.
 // @description 將觸控板雙指滑動改成拖曳 Google Maps，並保留雙指捏合縮放。
 // @author       TW527E
@@ -54,6 +54,11 @@
     // animating its momentum. A pinch inside this window starts a zero-net
     // drag to interrupt that animation before zooming.
     recentPanMomentumMs: 700,
+
+    // Ignore wheel inertia briefly after a real mouse/pointer event takes over
+    // an active synthetic drag. Otherwise residual wheel events can immediately
+    // press the synthetic button again and interleave both pointer streams.
+    pointerTakeoverGuardMs: 140,
   });
 
   const MAP_SURFACE_SELECTORS = [
@@ -68,6 +73,10 @@
   let pinchGuardActive = false;
   let pinchGuardTimer = 0;
   let lastPanActivityAt = Number.NEGATIVE_INFINITY;
+  let pointerTakeoverActive = false;
+  let pointerTakeoverTimer = 0;
+  let nativePointerButtons = 0;
+  const syntheticMouseEvents = new WeakSet();
   let inputTransaction = {
     kind: null,
     lastEventAt: 0,
@@ -163,7 +172,7 @@
   }
 
   function emitMouse(type, target, x, y, buttons) {
-    target.dispatchEvent(new MouseEvent(type, {
+    const event = new MouseEvent(type, {
       bubbles: true,
       cancelable: true,
       composed: true,
@@ -175,7 +184,10 @@
       clientY: y,
       button: 0,
       buttons,
-    }));
+    });
+
+    syntheticMouseEvents.add(event);
+    target.dispatchEvent(event);
   }
 
   function beginDrag(surface, event) {
@@ -225,6 +237,7 @@
       // clientX/clientY above remain sufficient for absolute-position handlers.
     }
 
+    syntheticMouseEvents.add(event);
     drag.target.dispatchEvent(event);
   }
 
@@ -289,18 +302,64 @@
     const surface = mapSurfaceAt(event.clientX, event.clientY);
     if (!surface) return;
 
-    // A new drag immediately stops Google Maps' kinetic pan. Move a few pixels
-    // out and back so Maps treats this as a drag rather than a map click, while
-    // leaving the camera and pinch anchor at the original location.
+    // A new drag immediately stops Google Maps' kinetic pan. Keep the pointer
+    // stationary: an out-and-back probe leaves a non-zero final movement that
+    // Maps can interpret as reverse release velocity, which makes the map
+    // bounce in the opposite direction.
     beginDrag(surface, event);
-    moveDrag(6, 0);
-    moveDrag(-6, 0);
+    moveDrag(0, 0);
   }
 
   function cancelPinchGuard() {
     window.clearTimeout(pinchGuardTimer);
     pinchGuardTimer = 0;
     pinchGuardActive = false;
+  }
+
+  function finishPointerTakeover() {
+    window.clearTimeout(pointerTakeoverTimer);
+    pointerTakeoverTimer = 0;
+
+    if (nativePointerButtons !== 0) return;
+
+    pointerTakeoverActive = false;
+    resetInputTransaction();
+  }
+
+  function schedulePointerTakeoverEnd() {
+    window.clearTimeout(pointerTakeoverTimer);
+    pointerTakeoverTimer = window.setTimeout(
+      finishPointerTakeover,
+      SETTINGS.pointerTakeoverGuardMs,
+    );
+  }
+
+  function beginOrContinuePointerTakeover() {
+    const isNewTakeover = !pointerTakeoverActive;
+    pointerTakeoverActive = true;
+    lastPanActivityAt = Number.NEGATIVE_INFINITY;
+
+    // The next wheel event must be classified independently from the old
+    // trackpad transaction. This lets a real mouse-wheel step pass through to
+    // Maps while a small/continuous inertial tail is still discarded below.
+    if (isNewTakeover) resetInputTransaction();
+
+    if (drag) {
+      // Clear the last synthetic velocity sample before releasing. The native
+      // event that triggered this function is still in capture phase, so Maps
+      // sees the synthetic mouseup before it sees the real pointer movement.
+      moveDrag(0, 0);
+      endDrag();
+    }
+
+    schedulePointerTakeoverEnd();
+  }
+
+  function cancelPointerTakeover() {
+    window.clearTimeout(pointerTakeoverTimer);
+    pointerTakeoverTimer = 0;
+    pointerTakeoverActive = false;
+    nativePointerButtons = 0;
   }
 
   function onWheel(event) {
@@ -328,6 +387,25 @@
       cancelPinchGuard();
       resetInputTransaction();
       endDrag();
+      return;
+    }
+
+    // A trusted mouse/pointer event has taken ownership of the map. Discard
+    // only the old wheel tail until it becomes quiet; never re-press the
+    // synthetic left button while native movement is in progress.
+    if (pointerTakeoverActive) {
+      // Do not let the takeover guard disable Google Maps' normal mouse-wheel
+      // zoom. A fresh, discrete wheel transaction is unrelated to the old
+      // two-finger inertia and should bypass the guard without losing native
+      // pointer-button ownership.
+      if (inputKind(event) === 'mouse') {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      resetInputTransaction();
+      beginOrContinuePointerTakeover();
       return;
     }
 
@@ -364,6 +442,8 @@
     event.preventDefault();
     event.stopImmediatePropagation();
 
+    if (!drag) interruptRecentMapMomentum(event);
+
     if (!drag || drag.scene !== surface.scene || !drag.target.isConnected) {
       endDrag();
       beginDrag(surface, event);
@@ -381,15 +461,80 @@
     passive: false,
   });
 
+  function isMousePointerEvent(event) {
+    return (
+      !('pointerType' in event) ||
+      event.pointerType === '' ||
+      event.pointerType === 'mouse'
+    );
+  }
+
+  function onNativePointerMove(event) {
+    if (syntheticMouseEvents.has(event) || !isMousePointerEvent(event)) return;
+
+    // A real mouse move must not arrive while Maps still sees the synthetic
+    // left button held down. Release it during capture so Maps cannot combine
+    // the physical cursor jump with the wheel-derived drag velocity.
+    nativePointerButtons = event.buttons;
+    if (drag || nativePointerButtons !== 0) {
+      beginOrContinuePointerTakeover();
+    } else if (pointerTakeoverActive && pointerTakeoverTimer === 0) {
+      // Recover if pointerup happened outside the window and the previous timer
+      // found the button still pressed. Ordinary button-free mouse movement
+      // must not keep extending the guard and disable wheel zoom indefinitely.
+      schedulePointerTakeoverEnd();
+    }
+  }
+
+  function onNativePointerDown(event) {
+    if (
+      syntheticMouseEvents.has(event) ||
+      !isMousePointerEvent(event) ||
+      event.button !== 0
+    ) {
+      return;
+    }
+
+    nativePointerButtons = event.buttons || 1;
+    cancelPinchGuard();
+    if (drag || pointerTakeoverActive) beginOrContinuePointerTakeover();
+  }
+
+  function onNativePointerUp(event) {
+    if (
+      syntheticMouseEvents.has(event) ||
+      !isMousePointerEvent(event) ||
+      (event.type !== 'pointercancel' && event.button !== 0)
+    ) {
+      return;
+    }
+
+    nativePointerButtons = event.buttons;
+    cancelPinchGuard();
+    if (drag || pointerTakeoverActive) beginOrContinuePointerTakeover();
+  }
+
+  // Real pointer input takes ownership immediately. This prevents a native
+  // mouse drag or release from interleaving with the synthetic wheel drag.
+  window.addEventListener('mousemove', onNativePointerMove, true);
+  window.addEventListener('pointermove', onNativePointerMove, true);
+  window.addEventListener('mousedown', onNativePointerDown, true);
+  window.addEventListener('pointerdown', onNativePointerDown, true);
+  window.addEventListener('mouseup', onNativePointerUp, true);
+  window.addEventListener('pointerup', onNativePointerUp, true);
+  window.addEventListener('pointercancel', onNativePointerUp, true);
+
   // Do not use capture here: focusing the map blurs the previously focused DOM
   // element, and a captured element-level blur would release our drag at once.
   window.addEventListener('blur', () => {
     cancelPinchGuard();
+    cancelPointerTakeover();
     endDrag();
   });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       cancelPinchGuard();
+      cancelPointerTakeover();
       endDrag();
     }
   });
