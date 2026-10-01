@@ -1,6 +1,6 @@
 <div align="center">
 
-[**繁體中文**](./README.md) · [English](./README.en.md)
+[**繁體中文**](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/README.md) · [English](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/README.en.md)
 
 # Google Maps 觸控板雙指拖曳與縮放
 
@@ -48,7 +48,7 @@ Tampermonkey 使用者腳本會重新安排操作方式，讓網頁版地圖更�
 ### 手動安裝
 
 1. 在 Tampermonkey 中建立新的使用者腳本。
-2. 複製 [`google-maps-trackpad.user.js`](./google-maps-trackpad.user.js) 的完整內容。
+2. 複製 [`google-maps-trackpad.user.js`](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/google-maps-trackpad.user.js) 的完整內容。
 3. 貼到編輯器、儲存，然後重新整理 Google Maps。
 
 ## 設定
@@ -142,11 +142,11 @@ inputDevice: 'trackpad'
 
 ## 授權條款
 
-本專案採用 [MIT License](./LICENSE) 授權。
+本專案採用 [MIT License](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/LICENSE) 授權。
 
 ## 相關連結
 
 - [Greasy Fork](https://greasyfork.org/zh-TW/scripts/588879-google-maps-觸控板雙指拖曳與縮放)
 - [原始碼](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad)
 - [問題回報](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/issues)
-- [MIT License](./LICENSE)
+- [MIT License](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/LICENSE)

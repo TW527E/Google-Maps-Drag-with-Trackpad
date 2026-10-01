@@ -1,6 +1,6 @@
 <div align="center">
 
-[繁體中文](./README.md) · [**English**](./README.en.md)
+[繁體中文](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/README.md) · [**English**](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/README.en.md)
 
 # Google Maps Trackpad Pan & Pinch Zoom
 
@@ -53,7 +53,7 @@ normally.
 
 1. Create a new userscript in Tampermonkey.
 2. Copy the complete contents of
-   [`google-maps-trackpad.user.js`](./google-maps-trackpad.user.js).
+   [`google-maps-trackpad.user.js`](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/google-maps-trackpad.user.js).
 3. Paste it into the editor, save it, and reload Google Maps.
 
 ## Configuration
@@ -157,11 +157,11 @@ Set `panSpeed` to a negative value such as `-1`.
 
 ## License
 
-This project is licensed under the [MIT License](./LICENSE).
+This project is licensed under the [MIT License](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/LICENSE).
 
 ## Links
 
 - [Greasy Fork](https://greasyfork.org/zh-TW/scripts/588879-google-maps-觸控板雙指拖曳與縮放)
 - [Source code](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad)
 - [Issue tracker](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/issues)
-- [MIT License](./LICENSE)
+- [MIT License](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/LICENSE)
