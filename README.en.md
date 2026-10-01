@@ -1,5 +1,3 @@
-<div align="center">
-
 [繁體中文](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/README.md) · [**English**](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/blob/main/README.en.md)
 
 # Google Maps Trackpad Pan & Pinch Zoom
@@ -10,8 +8,6 @@ Natural trackpad controls for Google Maps on the web, designed with MacBook user
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-Userscript-00485b)](https://www.tampermonkey.net/)
 
 [Install now](https://greasyfork.org/zh-TW/scripts/588879-google-maps-觸控板雙指拖曳與縮放) · [Report an issue](https://github.com/TW527E/Google-Maps-Drag-with-Trackpad/issues)
-
-</div>
 
 ## Overview
 
