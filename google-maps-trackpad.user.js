@@ -2,12 +2,12 @@
 // @name:en         Google Maps Trackpad Pan & Pinch Zoom
 // @name   Google Maps 觸控板雙指拖曳與縮放
 // @namespace    https://github.com/TW527E/Google-Maps-Drag-with-Trackpad
-// @version      1.2.4
+// @version      1.2.5
 // @description:en  Use two-finger trackpad scrolling to pan Google Maps while keeping pinch-to-zoom.
 // @description 將觸控板雙指滑動改成拖曳 Google Maps，並保留雙指捏合縮放。
 // @author       TW527E
-// @include      /^https:\/\/(?:www\.)?google\.[^/]+\/maps(?:[/?#].*)?$/
-// @include      /^https:\/\/maps\.google\.[^/]+\/(?:[?#].*)?$/
+// @include      /^https:\/\/(?:www\.)?google\.(?:com|[a-z]{2}|com?\.[a-z]{2})\/maps(?:[/?#].*)?$/
+// @include      /^https:\/\/maps\.google\.(?:com|[a-z]{2}|com?\.[a-z]{2})\/(?:[?#].*)?$/
 // @run-at       document-start
 // @grant        none
 // @license      MIT
@@ -399,6 +399,9 @@
       // two-finger inertia and should bypass the guard without losing native
       // pointer-button ownership.
       if (inputKind(event) === 'mouse') {
+        // Classify the next event afresh: a cached "mouse" would also let the
+        // trackpad inertia that is still arriving through as wheel zoom.
+        resetInputTransaction();
         return;
       }
 
@@ -413,6 +416,14 @@
     // the fingers have already started pinching. Consume that residual stream
     // and extend the quiet-period timer instead of beginning another drag or
     // allowing Maps to reinterpret it as wheel zoom.
+    // An explicit mouse setting has no trackpad tail to wait out; without this,
+    // a plain wheel right after Ctrl+wheel is swallowed for as long as it keeps turning.
+    if (pinchGuardActive && SETTINGS.inputDevice === 'mouse') {
+      cancelPinchGuard();
+      endDrag();
+      return;
+    }
+
     if (pinchGuardActive) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -441,6 +452,11 @@
     // listener from interpreting a vertical two-finger slide as zoom.
     event.preventDefault();
     event.stopImmediatePropagation();
+
+    // The real left button is held: it owns the map. Starting a synthetic drag
+    // now would press a second left button on top of it, so swallow the swipe.
+    // A new gesture can start as soon as the button is released.
+    if (!drag && nativePointerButtons !== 0) return;
 
     if (!drag) interruptRecentMapMomentum(event);
 
